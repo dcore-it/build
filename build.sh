@@ -13,8 +13,8 @@ DEVICE="peridot"
 LUNCH_TARGET="lineage_peridot-cp2a-user"
 
 export TZ="Asia/Jakarta"
-export BUILD_USERNAME="ZXStk"
-export BUILD_HOSTNAME="zen"
+export BUILD_USERNAME="dcore"
+export BUILD_HOSTNAME="lake"
 
 # =====================================
 # Helper
