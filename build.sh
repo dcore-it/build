@@ -7,7 +7,7 @@ set -e
 # =====================================
 ROM_URL="https://github.com/Evolution-X/manifest"
 ROM_BRANCH="cnb"
-MANIFEST_URL="https://github.com/droidcore/manifest_peridot.git"
+MANIFEST_URL="https://github.com/dcore-it/manifest_peridot.git"
 
 DEVICE="peridot"
 LUNCH_TARGET="lineage_peridot-cp2a-user"
