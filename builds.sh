@@ -3,17 +3,6 @@
 set -e
 
 # ==========================================
-# Colors
-# ==========================================
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-RESET='\033[0m'
-
-# ==========================================
 # Configuration
 # ==========================================
 ROM_NAME="Evolution-X"
@@ -27,6 +16,17 @@ LUNCH_TARGET="lineage_peridot-cp2a-user"
 export TZ="Asia/Jakarta"
 export BUILD_USERNAME="dcore"
 export BUILD_HOSTNAME="lake"
+
+# ==========================================
+# Colors
+# ==========================================
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+RESET='\033[0m'
 
 # ==========================================
 # Helper Functions
@@ -55,7 +55,7 @@ error() {
 }
 
 # ==========================================
-# Load Private Environment
+# Load .env
 # ==========================================
 load_env() {
     if [[ -f ".env" ]]; then
@@ -80,7 +80,8 @@ upload_pixeldrain() {
     fi
 
     if [[ -z "${PIXELDRAIN_TOKEN:-}" ]]; then
-        error "PIXELDRAIN_TOKEN is not set"
+        warning "PIXELDRAIN_TOKEN is not set"
+        warning "Skipping PixelDrain upload"
         return 1
     fi
 
@@ -139,12 +140,13 @@ info "Build Host : ${BUILD_HOSTNAME}"
 info "Build User : ${BUILD_USERNAME}"
 
 # ==========================================
-# Cleanup
+# Clean Previous Source
 # ==========================================
 log "Cleaning Previous Source"
 
 rm -rf .repo/local_manifests
 rm -rf "device/xiaomi/${DEVICE}"
+rm -rf "out/target/product/${DEVICE}"
 
 success "Cleanup complete"
 
@@ -162,7 +164,7 @@ repo init \
 success "Repo initialization complete"
 
 # ==========================================
-# Local Manifest
+# Clone Local Manifest
 # ==========================================
 log "Cloning Local Manifest"
 
@@ -176,26 +178,20 @@ success "Local manifest ready"
 # ==========================================
 # Crave Resync
 # ==========================================
-log "Running Crave Resync"
-
-/opt/crave/resync.sh
-
-success "Crave resync complete"
-
-# ==========================================
-# Repo Sync
-# ==========================================
 log "Syncing Source"
 
 SYNC_START=$(date +%s)
 
-repo sync \
-    -c \
-    --no-clone-bundle \
-    --no-tags \
-    --optimized-fetch \
-    --prune \
-    --force-sync
+if [[ -f /opt/crave/resync.sh ]]; then
+    /opt/crave/resync.sh
+else
+    repo sync \
+        -c \
+        --force-sync \
+        --no-tags \
+        --no-clone-bundle \
+        --force-remove-dirty
+fi
 
 SYNC_END=$(date +%s)
 
@@ -209,7 +205,7 @@ log "Preparing Build Environment"
 
 . build/envsetup.sh
 
-# Load .env AFTER envsetup.sh
+# Load .env after envsetup.sh
 load_env
 
 lunch "${LUNCH_TARGET}"
@@ -235,7 +231,6 @@ BUILD_START=$(date +%s)
 if m evolution; then
 
     BUILD_END=$(date +%s)
-    TOTAL_END=$(date +%s)
 
     echo
     echo -e "${GREEN}${BOLD}"
@@ -248,11 +243,10 @@ if m evolution; then
     success "Device: ${DEVICE}"
 
     info "Build time: $(((BUILD_END - BUILD_START) / 60)) minutes"
-    info "Total time: $(((TOTAL_END - START_TOTAL) / 60)) minutes"
 
-    # ==========================================
+    # ======================================
     # Find Newest ROM ZIP
-    # ==========================================
+    # ======================================
     ROM_ZIP=$(find "out/target/product/${DEVICE}" \
         -maxdepth 1 \
         -type f \
@@ -264,29 +258,30 @@ if m evolution; then
         | head -n 1 \
         | cut -d' ' -f2-)
 
-    if [[ -n "$ROM_ZIP" && -f "$ROM_ZIP" ]]; then
+    if [[ -n "${ROM_ZIP}" && -f "${ROM_ZIP}" ]]; then
 
         echo
         success "ROM ZIP found"
-        info "$(basename "$ROM_ZIP")"
-        info "Size: $(du -h "$ROM_ZIP" | cut -f1)"
+        info "$(basename "${ROM_ZIP}")"
+        info "Size: $(du -h "${ROM_ZIP}" | cut -f1)"
 
-        # ==========================================
+        # ==================================
         # PixelDrain Upload
-        # ==========================================
-        if ! upload_pixeldrain "$ROM_ZIP"; then
-            warning "ROM built successfully, but PixelDrain upload failed."
-        fi
+        # ==================================
+        upload_pixeldrain "${ROM_ZIP}" || true
 
     else
-        warning "ROM ZIP not found. Upload skipped."
+
+        warning "ROM ZIP not found"
+        warning "Upload skipped"
+
     fi
 
 else
 
     echo
-    error "Build failed."
-    warning "PixelDrain upload skipped."
+    error "Build failed"
+    warning "PixelDrain upload skipped"
 
     exit 1
 
@@ -295,7 +290,11 @@ fi
 # ==========================================
 # Finished
 # ==========================================
+TOTAL_END=$(date +%s)
+
 log "Build Finished"
 
-echo
 success "Everything completed!"
+info "Total time: $(((TOTAL_END - START_TOTAL) / 60)) minutes"
+
+echo
