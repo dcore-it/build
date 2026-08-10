@@ -55,29 +55,46 @@ error() {
 }
 
 # ==========================================
-# GoFile Upload
+# Load Private Environment
 # ==========================================
-upload_gofile() {
+load_env() {
+    if [[ -f ".env" ]]; then
+        source ".env"
+        success "Private environment loaded"
+    else
+        warning ".env not found"
+    fi
+}
+
+# ==========================================
+# PixelDrain Upload
+# ==========================================
+upload_pixeldrain() {
     local FILE="$1"
     local RESPONSE
-    local LINK
+    local FILE_ID
 
     if [[ ! -f "$FILE" ]]; then
         error "File not found: $FILE"
         return 1
     fi
 
+    if [[ -z "${PIXELDRAIN_TOKEN:-}" ]]; then
+        error "PIXELDRAIN_TOKEN is not set"
+        return 1
+    fi
+
     if ! command -v curl >/dev/null 2>&1; then
-        error "curl is not installed!"
+        error "curl is not installed"
         return 1
     fi
 
     if ! command -v jq >/dev/null 2>&1; then
-        error "jq is not installed!"
+        error "jq is not installed"
         return 1
     fi
 
-    log "Uploading ROM to GoFile"
+    log "Uploading ROM to PixelDrain"
 
     info "File: $(basename "$FILE")"
     info "Size: $(du -h "$FILE" | cut -f1)"
@@ -86,25 +103,25 @@ upload_gofile() {
 
     RESPONSE=$(curl \
         --progress-bar \
-        -X POST \
-        -F "file=@$FILE" \
-        "https://upload.gofile.io/uploadfile")
+        -T "$FILE" \
+        -u ":${PIXELDRAIN_TOKEN}" \
+        "https://pixeldrain.com/api/file/")
 
-    LINK=$(echo "$RESPONSE" | jq -r '.data.downloadPage // empty')
+    FILE_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
 
-    if [[ -z "$LINK" ]]; then
-        error "GoFile upload failed."
+    if [[ -z "$FILE_ID" ]]; then
+        error "PixelDrain upload failed"
         echo
         echo "$RESPONSE"
         return 1
     fi
 
     echo
-    success "Upload completed!"
+    success "PixelDrain upload completed!"
 
     echo
     echo -e "${GREEN}${BOLD}Download:${RESET}"
-    echo "$LINK"
+    echo "https://pixeldrain.com/u/${FILE_ID}"
     echo
 }
 
@@ -192,6 +209,9 @@ log "Preparing Build Environment"
 
 . build/envsetup.sh
 
+# Load .env AFTER envsetup.sh
+load_env
+
 lunch "${LUNCH_TARGET}"
 
 success "Build environment ready"
@@ -231,7 +251,7 @@ if m evolution; then
     info "Total time: $(((TOTAL_END - START_TOTAL) / 60)) minutes"
 
     # ==========================================
-    # Find ROM ZIP
+    # Find Newest ROM ZIP
     # ==========================================
     ROM_ZIP=$(find "out/target/product/${DEVICE}" \
         -maxdepth 1 \
@@ -245,17 +265,19 @@ if m evolution; then
         | cut -d' ' -f2-)
 
     if [[ -n "$ROM_ZIP" && -f "$ROM_ZIP" ]]; then
+
         echo
         success "ROM ZIP found"
         info "$(basename "$ROM_ZIP")"
         info "Size: $(du -h "$ROM_ZIP" | cut -f1)"
 
         # ==========================================
-        # Upload
+        # PixelDrain Upload
         # ==========================================
-        if ! upload_gofile "$ROM_ZIP"; then
-            warning "ROM built successfully, but upload failed."
+        if ! upload_pixeldrain "$ROM_ZIP"; then
+            warning "ROM built successfully, but PixelDrain upload failed."
         fi
+
     else
         warning "ROM ZIP not found. Upload skipped."
     fi
@@ -264,9 +286,16 @@ else
 
     echo
     error "Build failed."
-    warning "GoFile upload skipped."
+    warning "PixelDrain upload skipped."
 
     exit 1
+
 fi
 
-log "Done!"
+# ==========================================
+# Finished
+# ==========================================
+log "Build Finished"
+
+echo
+success "Everything completed!"
