@@ -67,12 +67,37 @@ load_env() {
 }
 
 # ==========================================
+# Telegram Notification
+# ==========================================
+send_telegram() {
+    local MESSAGE="$1"
+
+    if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
+        return 0
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        warning "curl is not installed"
+        return 0
+    fi
+
+    curl -s \
+        --fail \
+        -X POST \
+        "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+        -d "chat_id=${TELEGRAM_CHAT_ID}" \
+        --data-urlencode "text=${MESSAGE}" \
+        >/dev/null || warning "Telegram notification failed"
+}
+
+# ==========================================
 # PixelDrain Upload
 # ==========================================
 upload_pixeldrain() {
     local FILE="$1"
     local RESPONSE
     local FILE_ID
+    local DOWNLOAD_URL
 
     if [[ ! -f "$FILE" ]]; then
         error "File not found: $FILE"
@@ -112,18 +137,37 @@ upload_pixeldrain() {
 
     if [[ -z "$FILE_ID" ]]; then
         error "PixelDrain upload failed"
+
         echo
         echo "$RESPONSE"
+
+        send_telegram "❌ PixelDrain upload failed
+
+ROM: ${ROM_NAME}
+Device: ${DEVICE}
+File: $(basename "$FILE")"
+
         return 1
     fi
+
+    DOWNLOAD_URL="https://pixeldrain.com/u/${FILE_ID}"
 
     echo
     success "PixelDrain upload completed!"
 
     echo
     echo -e "${GREEN}${BOLD}Download:${RESET}"
-    echo "https://pixeldrain.com/u/${FILE_ID}"
+    echo "$DOWNLOAD_URL"
     echo
+
+    send_telegram "📦 ${ROM_NAME} upload completed
+
+Device: ${DEVICE}
+File: $(basename "$FILE")
+Size: $(du -h "$FILE" | cut -f1)
+
+Download:
+${DOWNLOAD_URL}"
 }
 
 # ==========================================
@@ -205,12 +249,23 @@ log "Preparing Build Environment"
 
 . build/envsetup.sh
 
-# Load .env after envsetup.sh
+# Load .env AFTER envsetup.sh
 load_env
 
 lunch "${LUNCH_TARGET}"
 
 success "Build environment ready"
+
+# ==========================================
+# Build Started Notification
+# ==========================================
+send_telegram "🚀 ${ROM_NAME} build started
+
+Device: ${DEVICE}
+Branch: ${ROM_BRANCH}
+Lunch: ${LUNCH_TARGET}
+Host: ${BUILD_HOSTNAME}
+User: ${BUILD_USERNAME}"
 
 # ==========================================
 # Install Clean
@@ -266,6 +321,18 @@ if m evolution; then
         info "Size: $(du -h "${ROM_ZIP}" | cut -f1)"
 
         # ==================================
+        # Build Success Notification
+        # ==================================
+        send_telegram "✅ ${ROM_NAME} build successful
+
+Device: ${DEVICE}
+File: $(basename "${ROM_ZIP}")
+Size: $(du -h "${ROM_ZIP}" | cut -f1)
+Build time: $(((BUILD_END - BUILD_START) / 60)) minutes
+
+📤 Uploading to PixelDrain..."
+
+        # ==================================
         # PixelDrain Upload
         # ==================================
         upload_pixeldrain "${ROM_ZIP}" || true
@@ -275,6 +342,11 @@ if m evolution; then
         warning "ROM ZIP not found"
         warning "Upload skipped"
 
+        send_telegram "⚠️ ${ROM_NAME} build completed but ROM ZIP was not found
+
+Device: ${DEVICE}
+Host: ${BUILD_HOSTNAME}"
+
     fi
 
 else
@@ -282,6 +354,13 @@ else
     echo
     error "Build failed"
     warning "PixelDrain upload skipped"
+
+    send_telegram "❌ ${ROM_NAME} build failed
+
+Device: ${DEVICE}
+Branch: ${ROM_BRANCH}
+Lunch: ${LUNCH_TARGET}
+Host: ${BUILD_HOSTNAME}"
 
     exit 1
 
@@ -296,5 +375,11 @@ log "Build Finished"
 
 success "Everything completed!"
 info "Total time: $(((TOTAL_END - START_TOTAL) / 60)) minutes"
+
+send_telegram "🏁 ${ROM_NAME} job finished
+
+Device: ${DEVICE}
+Host: ${BUILD_HOSTNAME}
+Total time: $(((TOTAL_END - START_TOTAL) / 60)) minutes"
 
 echo
