@@ -11,7 +11,7 @@ ROM_BRANCH="16.2"
 MANIFEST_URL="https://github.com/dcore-it/manifest_peridot.git"
 
 DEVICE="peridot"
-LUNCH_TARGET="lineage_peridot-bp4a-user"
+BUILD_VARIANT="bp4a-user"
 
 export TZ="Asia/Jakarta"
 export BUILD_USERNAME="dcore"
@@ -27,6 +27,12 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 RESET='\033[0m'
+
+# ==========================================
+# Upload Result Variables
+# ==========================================
+PIXELDRAIN_URL=""
+GOFILE_URL=""
 
 # ==========================================
 # Helper Functions
@@ -67,7 +73,7 @@ load_env() {
 }
 
 # ==========================================
-# Telegram Notification
+# Telegram
 # ==========================================
 send_telegram() {
     local MESSAGE="$1"
@@ -91,13 +97,119 @@ send_telegram() {
 }
 
 # ==========================================
+# Telegram Templates
+# ==========================================
+telegram_build_start() {
+    send_telegram "🚀 BUILD STARTED
+
+ROM      : ${ROM_NAME}
+Device   : ${DEVICE}
+Variant  : ${BUILD_VARIANT}
+Branch   : ${ROM_BRANCH}
+Host     : ${BUILD_HOSTNAME}
+Builder  : ${BUILD_USERNAME}
+
+⏳ Build in progress..."
+}
+
+telegram_build_success() {
+    local FILE="$1"
+    local BUILD_TIME="$2"
+
+    send_telegram "✅ BUILD SUCCESSFUL
+
+ROM      : ${ROM_NAME}
+Device   : ${DEVICE}
+Variant  : ${BUILD_VARIANT}
+Branch   : ${ROM_BRANCH}
+
+📦 File
+$(basename "$FILE")
+
+💾 Size
+$(du -h "$FILE" | cut -f1)
+
+⏱ Build time
+${BUILD_TIME} minutes
+
+📤 Uploading to mirrors..."
+}
+
+telegram_build_failed() {
+    send_telegram "❌ BUILD FAILED
+
+ROM      : ${ROM_NAME}
+Device   : ${DEVICE}
+Variant  : ${BUILD_VARIANT}
+Branch   : ${ROM_BRANCH}
+Host     : ${BUILD_HOSTNAME}
+
+⚠️ Check the build log for details."
+}
+
+telegram_upload_results() {
+    local FILE="$1"
+
+    local MESSAGE="📦 UPLOAD COMPLETE
+
+ROM      : ${ROM_NAME}
+Device   : ${DEVICE}
+
+📄 File
+$(basename "$FILE")
+
+💾 Size
+$(du -h "$FILE" | cut -f1)"
+
+    if [[ -n "${PIXELDRAIN_URL}" ]]; then
+        MESSAGE="${MESSAGE}
+
+🟢 PixelDrain
+${PIXELDRAIN_URL}"
+    else
+        MESSAGE="${MESSAGE}
+
+🔴 PixelDrain
+Upload failed/skipped"
+    fi
+
+    if [[ -n "${GOFILE_URL}" ]]; then
+        MESSAGE="${MESSAGE}
+
+🟢 GoFile
+${GOFILE_URL}"
+    else
+        MESSAGE="${MESSAGE}
+
+🔴 GoFile
+Upload failed/skipped"
+    fi
+
+    send_telegram "$MESSAGE"
+}
+
+telegram_finished() {
+    local TOTAL_TIME="$1"
+
+    send_telegram "🏁 BUILD JOB FINISHED
+
+ROM      : ${ROM_NAME}
+Device   : ${DEVICE}
+Host     : ${BUILD_HOSTNAME}
+
+⏱ Total time
+${TOTAL_TIME} minutes"
+}
+
+# ==========================================
 # PixelDrain Upload
 # ==========================================
 upload_pixeldrain() {
     local FILE="$1"
     local RESPONSE
     local FILE_ID
-    local DOWNLOAD_URL
+
+    PIXELDRAIN_URL=""
 
     if [[ ! -f "$FILE" ]]; then
         error "File not found: $FILE"
@@ -137,37 +249,79 @@ upload_pixeldrain() {
 
     if [[ -z "$FILE_ID" ]]; then
         error "PixelDrain upload failed"
-
         echo
         echo "$RESPONSE"
-
-        send_telegram "❌ PixelDrain upload failed
-
-ROM: ${ROM_NAME}
-Device: ${DEVICE}
-File: $(basename "$FILE")"
-
         return 1
     fi
 
-    DOWNLOAD_URL="https://pixeldrain.com/u/${FILE_ID}"
+    PIXELDRAIN_URL="https://pixeldrain.com/u/${FILE_ID}"
 
     echo
     success "PixelDrain upload completed!"
 
     echo
-    echo -e "${GREEN}${BOLD}Download:${RESET}"
-    echo "$DOWNLOAD_URL"
+    echo -e "${GREEN}${BOLD}PixelDrain:${RESET}"
+    echo "$PIXELDRAIN_URL"
+    echo
+}
+
+# ==========================================
+# GoFile Upload
+# ==========================================
+upload_gofile() {
+    local FILE="$1"
+    local RESPONSE
+    local DOWNLOAD_URL
+
+    GOFILE_URL=""
+
+    if [[ ! -f "$FILE" ]]; then
+        error "File not found: $FILE"
+        return 1
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        error "curl is not installed"
+        return 1
+    fi
+
+    if ! command -v jq >/dev/null 2>&1; then
+        error "jq is not installed"
+        return 1
+    fi
+
+    log "Uploading ROM to GoFile"
+
+    info "File: $(basename "$FILE")"
+    info "Size: $(du -h "$FILE" | cut -f1)"
+    info "Region: Singapore"
+
     echo
 
-    send_telegram "📦 ${ROM_NAME} upload completed
+    RESPONSE=$(curl \
+        --progress-bar \
+        -X POST \
+        -F "file=@${FILE}" \
+        "https://upload-ap-sgp.gofile.io/uploadfile")
 
-Device: ${DEVICE}
-File: $(basename "$FILE")
-Size: $(du -h "$FILE" | cut -f1)
+    DOWNLOAD_URL=$(echo "$RESPONSE" | jq -r '.data.downloadPage // empty')
 
-Download:
-${DOWNLOAD_URL}"
+    if [[ -z "$DOWNLOAD_URL" ]]; then
+        error "GoFile upload failed"
+        echo
+        echo "$RESPONSE"
+        return 1
+    fi
+
+    GOFILE_URL="$DOWNLOAD_URL"
+
+    echo
+    success "GoFile upload completed!"
+
+    echo
+    echo -e "${GREEN}${BOLD}GoFile:${RESET}"
+    echo "$GOFILE_URL"
+    echo
 }
 
 # ==========================================
@@ -178,8 +332,8 @@ START_TOTAL=$(date +%s)
 log "Starting ${ROM_NAME} Build"
 
 info "Device     : ${DEVICE}"
+info "Variant    : ${BUILD_VARIANT}"
 info "Branch     : ${ROM_BRANCH}"
-info "Lunch      : ${LUNCH_TARGET}"
 info "Host       : ${BUILD_HOSTNAME}"
 info "User       : ${BUILD_USERNAME}"
 
@@ -251,20 +405,14 @@ log "Preparing Build Environment"
 # Load .env AFTER environment setup
 load_env
 
-lunch "${LUNCH_TARGET}"
+lunch lineage_peridot-bp4a-user
 
 success "Build environment ready"
 
 # ==========================================
-# Build Started Notification
+# Telegram - Build Started
 # ==========================================
-send_telegram "🚀 ${ROM_NAME} build started
-
-Device: ${DEVICE}
-Branch: ${ROM_BRANCH}
-Lunch: ${LUNCH_TARGET}
-Host: ${BUILD_HOSTNAME}
-User: ${BUILD_USERNAME}"
+telegram_build_start
 
 # ==========================================
 # Install Clean
@@ -285,6 +433,7 @@ BUILD_START=$(date +%s)
 if m bacon; then
 
     BUILD_END=$(date +%s)
+    BUILD_TIME=$(((BUILD_END - BUILD_START) / 60))
 
     echo
     echo -e "${GREEN}${BOLD}"
@@ -296,7 +445,7 @@ if m bacon; then
     success "ROM: ${ROM_NAME}"
     success "Device: ${DEVICE}"
 
-    info "Build time: $(((BUILD_END - BUILD_START) / 60)) minutes"
+    info "Build time: ${BUILD_TIME} minutes"
 
     # ======================================
     # Find Newest ROM ZIP
@@ -320,31 +469,40 @@ if m bacon; then
         info "Size: $(du -h "${ROM_ZIP}" | cut -f1)"
 
         # ==================================
-        # Build Success Notification
+        # Telegram - Build Success
         # ==================================
-        send_telegram "✅ ${ROM_NAME} build successful
-
-Device: ${DEVICE}
-File: $(basename "${ROM_ZIP}")
-Size: $(du -h "${ROM_ZIP}" | cut -f1)
-Build time: $(((BUILD_END - BUILD_START) / 60)) minutes
-
-📤 Uploading to PixelDrain..."
+        telegram_build_success \
+            "${ROM_ZIP}" \
+            "${BUILD_TIME}"
 
         # ==================================
-        # PixelDrain Upload
+        # Upload to PixelDrain
         # ==================================
         upload_pixeldrain "${ROM_ZIP}" || true
+
+        # ==================================
+        # Upload to GoFile
+        # ==================================
+        upload_gofile "${ROM_ZIP}" || true
+
+        # ==================================
+        # Send Both Links
+        # ==================================
+        telegram_upload_results "${ROM_ZIP}"
 
     else
 
         warning "ROM ZIP not found"
         warning "Upload skipped"
 
-        send_telegram "⚠️ ${ROM_NAME} build completed but ROM ZIP was not found
+        send_telegram "⚠️ BUILD COMPLETED
 
-Device: ${DEVICE}
-Host: ${BUILD_HOSTNAME}"
+ROM      : ${ROM_NAME}
+Device   : ${DEVICE}
+Variant  : ${BUILD_VARIANT}
+
+⚠️ ROM ZIP was not found.
+Upload skipped."
 
     fi
 
@@ -352,14 +510,9 @@ else
 
     echo
     error "Build failed"
-    warning "PixelDrain upload skipped"
+    warning "Uploads skipped"
 
-    send_telegram "❌ ${ROM_NAME} build failed
-
-Device: ${DEVICE}
-Branch: ${ROM_BRANCH}
-Lunch: ${LUNCH_TARGET}
-Host: ${BUILD_HOSTNAME}"
+    telegram_build_failed
 
     exit 1
 
@@ -369,16 +522,13 @@ fi
 # Finished
 # ==========================================
 TOTAL_END=$(date +%s)
+TOTAL_TIME=$(((TOTAL_END - START_TOTAL) / 60))
 
 log "Build Finished"
 
 success "Everything completed!"
-info "Total time: $(((TOTAL_END - START_TOTAL) / 60)) minutes"
+info "Total time: ${TOTAL_TIME} minutes"
 
-send_telegram "🏁 ${ROM_NAME} job finished
-
-Device: ${DEVICE}
-Host: ${BUILD_HOSTNAME}
-Total time: $(((TOTAL_END - START_TOTAL) / 60)) minutes"
+telegram_finished "${TOTAL_TIME}"
 
 echo
