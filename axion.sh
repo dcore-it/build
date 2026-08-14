@@ -255,9 +255,9 @@ load_env
 # ==========================================
 log "Selecting Axion Build Variant"
 
-axion peridot user core
+axion peridot user pico
 
-success "Axion Peridot User Core selected"
+success "Axion Peridot User Pico selected"
 
 # ==========================================
 # Build Started Notification
@@ -364,7 +364,7 @@ else
     send_telegram "❌ ${ROM_NAME} build failed
 
 Device: ${DEVICE}
-Variant: user core
+Variant: user pico
 Branch: ${ROM_BRANCH}
 Host: ${BUILD_HOSTNAME}"
 
