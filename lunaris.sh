@@ -33,6 +33,7 @@ RESET='\033[0m'
 # ==========================================
 PIXELDRAIN_URL=""
 GOFILE_URL=""
+SOURCEFORGE_UPLOAD_OK=0
 
 # ==========================================
 # Helper Functions
@@ -78,7 +79,8 @@ load_env() {
 send_telegram() {
     local MESSAGE="$1"
 
-    if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
+    if [[ -z "${TELEGRAM_BOT_TOKEN:-}" ||
+          -z "${TELEGRAM_CHAT_ID:-}" ]]; then
         return 0
     fi
 
@@ -97,7 +99,7 @@ send_telegram() {
 }
 
 # ==========================================
-# Telegram Templates
+# Telegram - Build Started
 # ==========================================
 telegram_build_start() {
     send_telegram "🚀 BUILD STARTED
@@ -112,6 +114,9 @@ Builder  : ${BUILD_USERNAME}
 ⏳ Build in progress..."
 }
 
+# ==========================================
+# Telegram - Build Success
+# ==========================================
 telegram_build_success() {
     local FILE="$1"
     local BUILD_TIME="$2"
@@ -135,6 +140,9 @@ ${BUILD_TIME} minutes
 📤 Uploading to mirrors..."
 }
 
+# ==========================================
+# Telegram - Build Failed
+# ==========================================
 telegram_build_failed() {
     send_telegram "❌ BUILD FAILED
 
@@ -147,6 +155,9 @@ Host     : ${BUILD_HOSTNAME}
 ⚠️ Check the build log for details."
 }
 
+# ==========================================
+# Telegram - Upload Results
+# ==========================================
 telegram_upload_results() {
     local FILE="$1"
 
@@ -154,6 +165,7 @@ telegram_upload_results() {
 
 ROM      : ${ROM_NAME}
 Device   : ${DEVICE}
+Variant  : ${BUILD_VARIANT}
 
 📄 File
 $(basename "$FILE")
@@ -161,6 +173,9 @@ $(basename "$FILE")
 💾 Size
 $(du -h "$FILE" | cut -f1)"
 
+    # --------------------------------------
+    # PixelDrain
+    # --------------------------------------
     if [[ -n "${PIXELDRAIN_URL}" ]]; then
         MESSAGE="${MESSAGE}
 
@@ -173,6 +188,9 @@ ${PIXELDRAIN_URL}"
 Upload failed/skipped"
     fi
 
+    # --------------------------------------
+    # GoFile
+    # --------------------------------------
     if [[ -n "${GOFILE_URL}" ]]; then
         MESSAGE="${MESSAGE}
 
@@ -185,9 +203,27 @@ ${GOFILE_URL}"
 Upload failed/skipped"
     fi
 
+    # --------------------------------------
+    # SourceForge
+    # --------------------------------------
+    if [[ "${SOURCEFORGE_UPLOAD_OK}" == "1" ]]; then
+        MESSAGE="${MESSAGE}
+
+🟢 SourceForge
+https://sourceforge.net/projects/${SOURCEFORGE_PROJECT}/files/"
+    else
+        MESSAGE="${MESSAGE}
+
+🔴 SourceForge
+Upload failed/skipped"
+    fi
+
     send_telegram "$MESSAGE"
 }
 
+# ==========================================
+# Telegram - Finished
+# ==========================================
 telegram_finished() {
     local TOTAL_TIME="$1"
 
@@ -195,6 +231,7 @@ telegram_finished() {
 
 ROM      : ${ROM_NAME}
 Device   : ${DEVICE}
+Variant  : ${BUILD_VARIANT}
 Host     : ${BUILD_HOSTNAME}
 
 ⏱ Total time
@@ -235,7 +272,7 @@ upload_pixeldrain() {
     log "Uploading ROM to PixelDrain"
 
     info "File: $(basename "$FILE")"
-    info "Size: $(du -h "$FILE" | cut -f1)"
+    info "Size: $(du -h "$FILE" | cut -f1)
 
     echo
 
@@ -325,6 +362,63 @@ upload_gofile() {
 }
 
 # ==========================================
+# SourceForge Upload
+# ==========================================
+upload_sourceforge() {
+    local FILE="$1"
+    local UPLOAD_PATH
+
+    SOURCEFORGE_UPLOAD_OK=0
+
+    if [[ ! -f "$FILE" ]]; then
+        error "File not found: $FILE"
+        return 1
+    fi
+
+    if [[ -z "${SOURCEFORGE_USERNAME:-}" ||
+          -z "${SOURCEFORGE_PROJECT:-}" ]]; then
+        warning "SourceForge credentials are not configured"
+        warning "Skipping SourceForge upload"
+        return 1
+    fi
+
+    if ! command -v scp >/dev/null 2>&1; then
+        error "scp is not installed"
+        return 1
+    fi
+
+    log "Uploading ROM to SourceForge"
+
+    info "File: $(basename "$FILE")"
+    info "Size: $(du -h "$FILE" | cut -f1)"
+    info "Project: ${SOURCEFORGE_PROJECT}"
+
+    UPLOAD_PATH="${SOURCEFORGE_USERNAME}@frs.sourceforge.net:/home/frs/project/${SOURCEFORGE_PROJECT}"
+
+    echo
+
+    if scp "$FILE" "$UPLOAD_PATH"; then
+
+        SOURCEFORGE_UPLOAD_OK=1
+
+        success "SourceForge upload completed!"
+
+        echo
+        echo -e "${GREEN}${BOLD}SourceForge:${RESET}"
+        echo "https://sourceforge.net/projects/${SOURCEFORGE_PROJECT}/files/"
+        echo
+
+        return 0
+
+    else
+
+        error "SourceForge upload failed"
+        return 1
+
+    fi
+}
+
+# ==========================================
 # Start
 # ==========================================
 START_TOTAL=$(date +%s)
@@ -334,6 +428,7 @@ log "Starting ${ROM_NAME} Build"
 info "Device     : ${DEVICE}"
 info "Variant    : ${BUILD_VARIANT}"
 info "Branch     : ${ROM_BRANCH}"
+info "Lunch      : lineage_peridot-bp4a-user"
 info "Host       : ${BUILD_HOSTNAME}"
 info "User       : ${BUILD_USERNAME}"
 
@@ -380,14 +475,18 @@ log "Syncing Source"
 SYNC_START=$(date +%s)
 
 if [[ -f /opt/crave/resync.sh ]]; then
+
     /opt/crave/resync.sh
+
 else
+
     repo sync \
         -c \
         --force-sync \
         --no-tags \
         --no-clone-bundle \
         --force-remove-dirty
+
 fi
 
 SYNC_END=$(date +%s)
@@ -486,7 +585,12 @@ if m bacon; then
         upload_gofile "${ROM_ZIP}" || true
 
         # ==================================
-        # Send Both Links
+        # Upload to SourceForge
+        # ==================================
+        upload_sourceforge "${ROM_ZIP}" || true
+
+        # ==================================
+        # Send All Upload Links
         # ==================================
         telegram_upload_results "${ROM_ZIP}"
 
