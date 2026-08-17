@@ -272,7 +272,7 @@ upload_pixeldrain() {
     log "Uploading ROM to PixelDrain"
 
     info "File: $(basename "$FILE")"
-    info "Size: $(du -h "$FILE" | cut -f1)
+    info "Size: $(du -h "$FILE" | cut -f1)"
 
     echo
 
