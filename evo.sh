@@ -534,19 +534,7 @@ log "Building ${ROM_NAME}"
 
 BUILD_START=$(date +%s)
 
-# Save complete build output
-BUILD_LOG="out/target/product/${DEVICE}/build.log"
-
-# Make sure the directory exists
-mkdir -p "out/target/product/${DEVICE}"
-
-info "Build log: ${BUILD_LOG}"
-echo
-
-# ==========================================
-# Run Build + Save Log
-# ==========================================
-if m evolution 2>&1 | tee "${BUILD_LOG}"; then
+if m evolution; then
 
     BUILD_SUCCESS=1
 
@@ -567,67 +555,8 @@ if [[ "${BUILD_SUCCESS}" == "0" ]]; then
     echo
     error "BUILD FAILED"
     info "Build time: ${BUILD_TIME} minutes"
-    info "Full log: ${BUILD_LOG}"
 
-    echo
-    echo -e "${RED}${BOLD}"
-    echo "=========================================="
-    echo "          LAST 100 LOG LINES"
-    echo "=========================================="
-    echo -e "${RESET}"
-
-    tail -100 "${BUILD_LOG}"
-
-    # ======================================
-    # Upload Build Log ONLY to GoFile
-    # ======================================
-    log "Uploading Build Log to GoFile"
-
-    GOFILE_URL=""
-
-    upload_gofile "${BUILD_LOG}" || true
-
-    BUILD_LOG_GOFILE="${GOFILE_URL}"
-
-    # ======================================
-    # Telegram - Build Failed
-    # ======================================
-    FAILURE_MESSAGE="❌ BUILD FAILED
-
-ROM      : ${ROM_NAME}
-Device   : ${DEVICE}
-Variant  : ${BUILD_VARIANT}
-Branch   : ${ROM_BRANCH}
-Host     : ${BUILD_HOSTNAME}
-
-⏱ Build time
-${BUILD_TIME} minutes
-
-📋 Full build log"
-
-    if [[ -n "${BUILD_LOG_GOFILE}" ]]; then
-
-        FAILURE_MESSAGE="${FAILURE_MESSAGE}
-
-🟢 GoFile
-${BUILD_LOG_GOFILE}"
-
-    else
-
-        FAILURE_MESSAGE="${FAILURE_MESSAGE}
-
-🔴 GoFile
-Log upload failed"
-
-    fi
-
-    FAILURE_MESSAGE="${FAILURE_MESSAGE}
-
-🔎 Last 100 lines:
-
-$(tail -100 "${BUILD_LOG}")"
-
-    send_telegram "${FAILURE_MESSAGE}"
+    telegram_build_failed
 
     exit 1
 
@@ -645,62 +574,31 @@ echo -e "${RESET}"
 
 success "ROM: ${ROM_NAME}"
 success "Device: ${DEVICE}"
-
 info "Build time: ${BUILD_TIME} minutes"
-info "Build log: ${BUILD_LOG}"
 
 # ==========================================
-# Find Newest ROM ZIP
+# Find ZIP and IMG Artifacts
 # ==========================================
-ROM_ZIP=$(find "out/target/product/${DEVICE}" \
-    -maxdepth 1 \
-    -type f \
-    -name "*.zip" \
-    ! -name "*target_files*" \
-    ! -name "*ota*" \
-    -printf '%T@ %p\n' \
-    | sort -nr \
-    | head -n 1 \
-    | cut -d' ' -f2-)
+ARTIFACTS=()
 
-if [[ -n "${ROM_ZIP}" && -f "${ROM_ZIP}" ]]; then
+while IFS= read -r -d '' FILE; do
+    ARTIFACTS+=("$FILE")
+done < <(
+    find "out/target/product/${DEVICE}" \
+        -maxdepth 1 \
+        -type f \
+        \( -name "*.zip" -o -name "*.img" \) \
+        ! -name "*target_files*" \
+        ! -name "*ota*" \
+        -print0
+)
 
-    echo
-    success "ROM ZIP found"
-    info "$(basename "${ROM_ZIP}")"
-    info "Size: $(du -h "${ROM_ZIP}" | cut -f1)"
+# ==========================================
+# Check Artifacts
+# ==========================================
+if [[ ${#ARTIFACTS[@]} -eq 0 ]]; then
 
-    # ======================================
-    # Telegram - Build Success
-    # ======================================
-    telegram_build_success \
-        "${ROM_ZIP}" \
-        "${BUILD_TIME}"
-
-    # ======================================
-    # Upload ROM to PixelDrain
-    # ======================================
-    upload_pixeldrain "${ROM_ZIP}" || true
-
-    # ======================================
-    # Upload ROM to GoFile
-    # ======================================
-    upload_gofile "${ROM_ZIP}" || true
-
-    # ======================================
-    # Upload ROM to SourceForge
-    # ======================================
-    upload_sourceforge "${ROM_ZIP}" || true
-
-    # ======================================
-    # Send All Upload Links
-    # ======================================
-    telegram_upload_results "${ROM_ZIP}"
-
-else
-
-    warning "ROM ZIP not found"
-    warning "Upload skipped"
+    warning "No .zip or .img artifacts found"
 
     send_telegram "⚠️ BUILD COMPLETED
 
@@ -708,22 +606,102 @@ ROM      : ${ROM_NAME}
 Device   : ${DEVICE}
 Variant  : ${BUILD_VARIANT}
 
-⚠️ ROM ZIP was not found.
+⚠️ No .zip or .img artifacts were found.
 Upload skipped."
 
+else
+
+    success "Found ${#ARTIFACTS[@]} artifact(s)"
+
+    # ======================================
+    # Upload Each Artifact
+    # ======================================
+    for ARTIFACT in "${ARTIFACTS[@]}"; do
+
+        echo
+        log "Processing $(basename "${ARTIFACT}")"
+
+        info "Size: $(du -h "${ARTIFACT}" | cut -f1)"
+
+        # ----------------------------------
+        # Telegram - Artifact
+        # ----------------------------------
+        telegram_build_success \
+            "${ARTIFACT}" \
+            "${BUILD_TIME}"
+
+        # ----------------------------------
+        # PixelDrain
+        # ----------------------------------
+        upload_pixeldrain "${ARTIFACT}" || true
+
+        ARTIFACT_PIXELDRAIN="${PIXELDRAIN_URL}"
+
+        # ----------------------------------
+        # GoFile
+        # ----------------------------------
+        upload_gofile "${ARTIFACT}" || true
+
+        ARTIFACT_GOFILE="${GOFILE_URL}"
+
+        # ----------------------------------
+        # SourceForge
+        # ----------------------------------
+        upload_sourceforge "${ARTIFACT}" || true
+
+        # ----------------------------------
+        # Telegram - Upload Results
+        # ----------------------------------
+        ARTIFACT_MESSAGE="📦 UPLOAD COMPLETE
+
+ROM      : ${ROM_NAME}
+Device   : ${DEVICE}
+Variant  : ${BUILD_VARIANT}
+
+📄 File
+$(basename "${ARTIFACT}")
+
+💾 Size
+$(du -h "${ARTIFACT}" | cut -f1)"
+
+        if [[ -n "${ARTIFACT_PIXELDRAIN}" ]]; then
+            ARTIFACT_MESSAGE="${ARTIFACT_MESSAGE}
+
+🟢 PixelDrain
+${ARTIFACT_PIXELDRAIN}"
+        else
+            ARTIFACT_MESSAGE="${ARTIFACT_MESSAGE}
+
+🔴 PixelDrain
+Upload failed/skipped"
+        fi
+
+        if [[ -n "${ARTIFACT_GOFILE}" ]]; then
+            ARTIFACT_MESSAGE="${ARTIFACT_MESSAGE}
+
+🟢 GoFile
+${ARTIFACT_GOFILE}"
+        else
+            ARTIFACT_MESSAGE="${ARTIFACT_MESSAGE}
+
+🔴 GoFile
+Upload failed/skipped"
+        fi
+
+        if [[ "${SOURCEFORGE_UPLOAD_OK}" == "1" ]]; then
+            ARTIFACT_MESSAGE="${ARTIFACT_MESSAGE}
+
+🟢 SourceForge
+https://sourceforge.net/projects/${SOURCEFORGE_PROJECT}/files/"
+        else
+            ARTIFACT_MESSAGE="${ARTIFACT_MESSAGE}
+
+🔴 SourceForge
+Upload failed/skipped"
+        fi
+
+        send_telegram "${ARTIFACT_MESSAGE}"
+
+    done
+
 fi
-
-# ==========================================
-# Finished
-# ==========================================
-TOTAL_END=$(date +%s)
-TOTAL_TIME=$(((TOTAL_END - START_TOTAL) / 60))
-
-log "Build Finished"
-
-success "Everything completed!"
-info "Total time: ${TOTAL_TIME} minutes"
-
-telegram_finished "${TOTAL_TIME}"
-
-echo
