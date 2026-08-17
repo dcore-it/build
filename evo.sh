@@ -577,28 +577,43 @@ success "Device: ${DEVICE}"
 info "Build time: ${BUILD_TIME} minutes"
 
 # ==========================================
-# Find ZIP and IMG Artifacts
+# Find Build Artifacts
 # ==========================================
 ARTIFACTS=()
 
+# ROM ZIP files
 while IFS= read -r -d '' FILE; do
     ARTIFACTS+=("$FILE")
 done < <(
     find "out/target/product/${DEVICE}" \
         -maxdepth 1 \
         -type f \
-        \( -name "*.zip" -o -name "*.img" \) \
+        -name "*.zip" \
         ! -name "*target_files*" \
         ! -name "*ota*" \
         -print0
 )
+
+# Selected boot images ONLY
+for IMG in \
+    "vendor_boot.img" \
+    "dtbo.img" \
+    "boot.img" \
+    "recovery.img"
+do
+    IMG_PATH="out/target/product/${DEVICE}/${IMG}"
+
+    if [[ -f "${IMG_PATH}" ]]; then
+        ARTIFACTS+=("${IMG_PATH}")
+    fi
+done
 
 # ==========================================
 # Check Artifacts
 # ==========================================
 if [[ ${#ARTIFACTS[@]} -eq 0 ]]; then
 
-    warning "No .zip or .img artifacts found"
+    warning "No ROM or selected image artifacts found"
 
     send_telegram "⚠️ BUILD COMPLETED
 
@@ -606,7 +621,7 @@ ROM      : ${ROM_NAME}
 Device   : ${DEVICE}
 Variant  : ${BUILD_VARIANT}
 
-⚠️ No .zip or .img artifacts were found.
+⚠️ No ROM or selected image artifacts were found.
 Upload skipped."
 
 else
@@ -622,13 +637,6 @@ else
         log "Processing $(basename "${ARTIFACT}")"
 
         info "Size: $(du -h "${ARTIFACT}" | cut -f1)"
-
-        # ----------------------------------
-        # Telegram - Artifact
-        # ----------------------------------
-        telegram_build_success \
-            "${ARTIFACT}" \
-            "${BUILD_TIME}"
 
         # ----------------------------------
         # PixelDrain
@@ -650,7 +658,7 @@ else
         upload_sourceforge "${ARTIFACT}" || true
 
         # ----------------------------------
-        # Telegram - Upload Results
+        # Telegram
         # ----------------------------------
         ARTIFACT_MESSAGE="📦 UPLOAD COMPLETE
 
