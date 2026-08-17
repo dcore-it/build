@@ -534,77 +534,175 @@ log "Building ${ROM_NAME}"
 
 BUILD_START=$(date +%s)
 
-if m evolution; then
+# Save complete build output
+BUILD_LOG="out/target/product/${DEVICE}/build.log"
 
-    BUILD_END=$(date +%s)
-    BUILD_TIME=$(((BUILD_END - BUILD_START) / 60))
+# Make sure the directory exists
+mkdir -p "out/target/product/${DEVICE}"
+
+info "Build log: ${BUILD_LOG}"
+echo
+
+# ==========================================
+# Run Build + Save Log
+# ==========================================
+if m evolution 2>&1 | tee "${BUILD_LOG}"; then
+
+    BUILD_SUCCESS=1
+
+else
+
+    BUILD_SUCCESS=0
+
+fi
+
+BUILD_END=$(date +%s)
+BUILD_TIME=$(((BUILD_END - BUILD_START) / 60))
+
+# ==========================================
+# Build Failed
+# ==========================================
+if [[ "${BUILD_SUCCESS}" == "0" ]]; then
 
     echo
-    echo -e "${GREEN}${BOLD}"
+    error "BUILD FAILED"
+    info "Build time: ${BUILD_TIME} minutes"
+    info "Full log: ${BUILD_LOG}"
+
+    echo
+    echo -e "${RED}${BOLD}"
     echo "=========================================="
-    echo "          BUILD SUCCESSFUL"
+    echo "          LAST 100 LOG LINES"
     echo "=========================================="
     echo -e "${RESET}"
 
-    success "ROM: ${ROM_NAME}"
-    success "Device: ${DEVICE}"
-
-    info "Build time: ${BUILD_TIME} minutes"
+    tail -100 "${BUILD_LOG}"
 
     # ======================================
-    # Find Newest ROM ZIP
+    # Upload Build Log ONLY to GoFile
     # ======================================
-    ROM_ZIP=$(find "out/target/product/${DEVICE}" \
-        -maxdepth 1 \
-        -type f \
-        -name "*.zip" \
-        ! -name "*target_files*" \
-        ! -name "*ota*" \
-        -printf '%T@ %p\n' \
-        | sort -nr \
-        | head -n 1 \
-        | cut -d' ' -f2-)
+    log "Uploading Build Log to GoFile"
 
-    if [[ -n "${ROM_ZIP}" && -f "${ROM_ZIP}" ]]; then
+    GOFILE_URL=""
 
-        echo
-        success "ROM ZIP found"
-        info "$(basename "${ROM_ZIP}")"
-        info "Size: $(du -h "${ROM_ZIP}" | cut -f1)"
+    upload_gofile "${BUILD_LOG}" || true
 
-        # ==================================
-        # Telegram - Build Success
-        # ==================================
-        telegram_build_success \
-            "${ROM_ZIP}" \
-            "${BUILD_TIME}"
+    BUILD_LOG_GOFILE="${GOFILE_URL}"
 
-        # ==================================
-        # Upload to PixelDrain
-        # ==================================
-        upload_pixeldrain "${ROM_ZIP}" || true
+    # ======================================
+    # Telegram - Build Failed
+    # ======================================
+    FAILURE_MESSAGE="❌ BUILD FAILED
 
-        # ==================================
-        # Upload to GoFile
-        # ==================================
-        upload_gofile "${ROM_ZIP}" || true
+ROM      : ${ROM_NAME}
+Device   : ${DEVICE}
+Variant  : ${BUILD_VARIANT}
+Branch   : ${ROM_BRANCH}
+Host     : ${BUILD_HOSTNAME}
 
-        # ==================================
-        # Upload to SourceForge
-        # ==================================
-        upload_sourceforge "${ROM_ZIP}" || true
+⏱ Build time
+${BUILD_TIME} minutes
 
-        # ==================================
-        # Send All Upload Links
-        # ==================================
-        telegram_upload_results "${ROM_ZIP}"
+📋 Full build log"
+
+    if [[ -n "${BUILD_LOG_GOFILE}" ]]; then
+
+        FAILURE_MESSAGE="${FAILURE_MESSAGE}
+
+🟢 GoFile
+${BUILD_LOG_GOFILE}"
 
     else
 
-        warning "ROM ZIP not found"
-        warning "Upload skipped"
+        FAILURE_MESSAGE="${FAILURE_MESSAGE}
 
-        send_telegram "⚠️ BUILD COMPLETED
+🔴 GoFile
+Log upload failed"
+
+    fi
+
+    FAILURE_MESSAGE="${FAILURE_MESSAGE}
+
+🔎 Last 100 lines:
+
+$(tail -100 "${BUILD_LOG}")"
+
+    send_telegram "${FAILURE_MESSAGE}"
+
+    exit 1
+
+fi
+
+# ==========================================
+# Build Successful
+# ==========================================
+echo
+echo -e "${GREEN}${BOLD}"
+echo "=========================================="
+echo "          BUILD SUCCESSFUL"
+echo "=========================================="
+echo -e "${RESET}"
+
+success "ROM: ${ROM_NAME}"
+success "Device: ${DEVICE}"
+
+info "Build time: ${BUILD_TIME} minutes"
+info "Build log: ${BUILD_LOG}"
+
+# ==========================================
+# Find Newest ROM ZIP
+# ==========================================
+ROM_ZIP=$(find "out/target/product/${DEVICE}" \
+    -maxdepth 1 \
+    -type f \
+    -name "*.zip" \
+    ! -name "*target_files*" \
+    ! -name "*ota*" \
+    -printf '%T@ %p\n' \
+    | sort -nr \
+    | head -n 1 \
+    | cut -d' ' -f2-)
+
+if [[ -n "${ROM_ZIP}" && -f "${ROM_ZIP}" ]]; then
+
+    echo
+    success "ROM ZIP found"
+    info "$(basename "${ROM_ZIP}")"
+    info "Size: $(du -h "${ROM_ZIP}" | cut -f1)"
+
+    # ======================================
+    # Telegram - Build Success
+    # ======================================
+    telegram_build_success \
+        "${ROM_ZIP}" \
+        "${BUILD_TIME}"
+
+    # ======================================
+    # Upload ROM to PixelDrain
+    # ======================================
+    upload_pixeldrain "${ROM_ZIP}" || true
+
+    # ======================================
+    # Upload ROM to GoFile
+    # ======================================
+    upload_gofile "${ROM_ZIP}" || true
+
+    # ======================================
+    # Upload ROM to SourceForge
+    # ======================================
+    upload_sourceforge "${ROM_ZIP}" || true
+
+    # ======================================
+    # Send All Upload Links
+    # ======================================
+    telegram_upload_results "${ROM_ZIP}"
+
+else
+
+    warning "ROM ZIP not found"
+    warning "Upload skipped"
+
+    send_telegram "⚠️ BUILD COMPLETED
 
 ROM      : ${ROM_NAME}
 Device   : ${DEVICE}
@@ -612,18 +710,6 @@ Variant  : ${BUILD_VARIANT}
 
 ⚠️ ROM ZIP was not found.
 Upload skipped."
-
-    fi
-
-else
-
-    echo
-    error "Build failed"
-    warning "Uploads skipped"
-
-    telegram_build_failed
-
-    exit 1
 
 fi
 
