@@ -33,7 +33,6 @@ RESET='\033[0m'
 # ==========================================
 PIXELDRAIN_URL=""
 GOFILE_URL=""
-SOURCEFORGE_UPLOAD_OK=0
 
 # ==========================================
 # Helper Functions
@@ -115,32 +114,6 @@ Builder  : ${BUILD_USERNAME}
 }
 
 # ==========================================
-# Telegram - Build Success
-# ==========================================
-telegram_build_success() {
-    local FILE="$1"
-    local BUILD_TIME="$2"
-
-    send_telegram "✅ BUILD SUCCESSFUL
-
-ROM      : ${ROM_NAME}
-Device   : ${DEVICE}
-Variant  : ${BUILD_VARIANT}
-Branch   : ${ROM_BRANCH}
-
-📦 File
-$(basename "$FILE")
-
-💾 Size
-$(du -h "$FILE" | cut -f1)
-
-⏱ Build time
-${BUILD_TIME} minutes
-
-📤 Uploading to mirrors..."
-}
-
-# ==========================================
 # Telegram - Build Failed
 # ==========================================
 telegram_build_failed() {
@@ -152,7 +125,7 @@ Variant  : ${BUILD_VARIANT}
 Branch   : ${ROM_BRANCH}
 Host     : ${BUILD_HOSTNAME}
 
-⚠️ Check the build log for details."
+⚠️ Check the build output for details."
 }
 
 # ==========================================
@@ -200,21 +173,6 @@ ${GOFILE_URL}"
         MESSAGE="${MESSAGE}
 
 🔴 GoFile
-Upload failed/skipped"
-    fi
-
-    # --------------------------------------
-    # SourceForge
-    # --------------------------------------
-    if [[ "${SOURCEFORGE_UPLOAD_OK}" == "1" ]]; then
-        MESSAGE="${MESSAGE}
-
-🟢 SourceForge
-https://sourceforge.net/projects/${SOURCEFORGE_PROJECT}/files/"
-    else
-        MESSAGE="${MESSAGE}
-
-🔴 SourceForge
 Upload failed/skipped"
     fi
 
@@ -269,7 +227,7 @@ upload_pixeldrain() {
         return 1
     fi
 
-    log "Uploading ROM to PixelDrain"
+    log "Uploading $(basename "$FILE") to PixelDrain"
 
     info "File: $(basename "$FILE")"
     info "Size: $(du -h "$FILE" | cut -f1)"
@@ -329,7 +287,7 @@ upload_gofile() {
         return 1
     fi
 
-    log "Uploading ROM to GoFile"
+    log "Uploading $(basename "$FILE") to GoFile"
 
     info "File: $(basename "$FILE")"
     info "Size: $(du -h "$FILE" | cut -f1)"
@@ -363,63 +321,6 @@ upload_gofile() {
     echo -e "${GREEN}${BOLD}GoFile:${RESET}"
     echo "$GOFILE_URL"
     echo
-}
-
-# ==========================================
-# SourceForge Upload
-# ==========================================
-upload_sourceforge() {
-    local FILE="$1"
-    local UPLOAD_PATH
-
-    SOURCEFORGE_UPLOAD_OK=0
-
-    if [[ ! -f "$FILE" ]]; then
-        error "File not found: $FILE"
-        return 1
-    fi
-
-    if [[ -z "${SOURCEFORGE_USERNAME:-}" ||
-          -z "${SOURCEFORGE_PROJECT:-}" ]]; then
-        warning "SourceForge credentials are not configured"
-        warning "Skipping SourceForge upload"
-        return 1
-    fi
-
-    if ! command -v scp >/dev/null 2>&1; then
-        error "scp is not installed"
-        return 1
-    fi
-
-    log "Uploading ROM to SourceForge"
-
-    info "File: $(basename "$FILE")"
-    info "Size: $(du -h "$FILE" | cut -f1)"
-    info "Project: ${SOURCEFORGE_PROJECT}"
-
-    UPLOAD_PATH="${SOURCEFORGE_USERNAME}@frs.sourceforge.net:/home/frs/project/${SOURCEFORGE_PROJECT}"
-
-    echo
-
-    if scp "$FILE" "$UPLOAD_PATH"; then
-
-        SOURCEFORGE_UPLOAD_OK=1
-
-        success "SourceForge upload completed!"
-
-        echo
-        echo -e "${GREEN}${BOLD}SourceForge:${RESET}"
-        echo "https://sourceforge.net/projects/${SOURCEFORGE_PROJECT}/files/"
-        echo
-
-        return 0
-
-    else
-
-        error "SourceForge upload failed"
-        return 1
-
-    fi
 }
 
 # ==========================================
@@ -581,7 +482,9 @@ info "Build time: ${BUILD_TIME} minutes"
 # ==========================================
 ARTIFACTS=()
 
+# ------------------------------------------
 # ROM ZIP files
+# ------------------------------------------
 while IFS= read -r -d '' FILE; do
     ARTIFACTS+=("$FILE")
 done < <(
@@ -594,7 +497,9 @@ done < <(
         -print0
 )
 
+# ------------------------------------------
 # Selected boot images ONLY
+# ------------------------------------------
 for IMG in \
     "vendor_boot.img" \
     "dtbo.img" \
@@ -653,11 +558,6 @@ else
         ARTIFACT_GOFILE="${GOFILE_URL}"
 
         # ----------------------------------
-        # SourceForge
-        # ----------------------------------
-        upload_sourceforge "${ARTIFACT}" || true
-
-        # ----------------------------------
         # Telegram
         # ----------------------------------
         ARTIFACT_MESSAGE="📦 UPLOAD COMPLETE
@@ -696,20 +596,23 @@ ${ARTIFACT_GOFILE}"
 Upload failed/skipped"
         fi
 
-        if [[ "${SOURCEFORGE_UPLOAD_OK}" == "1" ]]; then
-            ARTIFACT_MESSAGE="${ARTIFACT_MESSAGE}
-
-🟢 SourceForge
-https://sourceforge.net/projects/${SOURCEFORGE_PROJECT}/files/"
-        else
-            ARTIFACT_MESSAGE="${ARTIFACT_MESSAGE}
-
-🔴 SourceForge
-Upload failed/skipped"
-        fi
-
         send_telegram "${ARTIFACT_MESSAGE}"
 
     done
 
 fi
+
+# ==========================================
+# Finished
+# ==========================================
+TOTAL_END=$(date +%s)
+TOTAL_TIME=$(((TOTAL_END - START_TOTAL) / 60))
+
+log "Build Finished"
+
+success "Everything completed!"
+info "Total time: ${TOTAL_TIME} minutes"
+
+telegram_finished "${TOTAL_TIME}"
+
+echo
