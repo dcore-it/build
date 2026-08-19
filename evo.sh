@@ -384,13 +384,11 @@ if [[ -f /opt/crave/resync.sh ]]; then
 
     info "Running Crave resync..."
 
-    # Do not stop the script if Crave resync fails
     /opt/crave/resync.sh || {
         warning "Crave resync returned an error"
         warning "Starting forced repo sync..."
     }
 
-    # Force another sync after Crave error
     info "Running forced repo sync..."
 
     repo sync \
@@ -399,7 +397,6 @@ if [[ -f /opt/crave/resync.sh ]]; then
         --force-remove-dirty \
         --no-tags \
         --no-clone-bundle \
-        --retry-fetches=5 \
         || {
             warning "Forced repo sync returned an error"
             warning "Continuing build anyway..."
@@ -416,7 +413,6 @@ else
         --force-remove-dirty \
         --no-tags \
         --no-clone-bundle \
-        --retry-fetches=5 \
         || {
             warning "Repo sync returned an error"
             warning "Continuing build anyway..."
