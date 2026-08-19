@@ -382,22 +382,51 @@ SYNC_START=$(date +%s)
 
 if [[ -f /opt/crave/resync.sh ]]; then
 
-    /opt/crave/resync.sh
+    info "Running Crave resync..."
 
-else
+    # Do not stop the script if Crave resync fails
+    /opt/crave/resync.sh || {
+        warning "Crave resync returned an error"
+        warning "Starting forced repo sync..."
+    }
+
+    # Force another sync after Crave error
+    info "Running forced repo sync..."
 
     repo sync \
         -c \
         --force-sync \
+        --force-remove-dirty \
         --no-tags \
         --no-clone-bundle \
-        --force-remove-dirty
+        --retry-fetches=5 \
+        || {
+            warning "Forced repo sync returned an error"
+            warning "Continuing build anyway..."
+        }
+
+else
+
+    warning "Crave resync script not found"
+    info "Running forced repo sync..."
+
+    repo sync \
+        -c \
+        --force-sync \
+        --force-remove-dirty \
+        --no-tags \
+        --no-clone-bundle \
+        --retry-fetches=5 \
+        || {
+            warning "Repo sync returned an error"
+            warning "Continuing build anyway..."
+        }
 
 fi
 
 SYNC_END=$(date +%s)
 
-success "Source sync complete"
+success "Source sync stage finished"
 info "Sync time: $(((SYNC_END - SYNC_START) / 60)) minutes"
 
 # ==========================================
