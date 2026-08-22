@@ -11,7 +11,7 @@ ROM_BRANCH="lineage-23.2"
 MANIFEST_URL="https://github.com/dcore-it/manifest_peridot.git"
 
 DEVICE="peridot"
-BUILD_VARIANT="vanilla"
+BUILD_VARIANT="pico"
 
 export TZ="Asia/Jakarta"
 export BUILD_USERNAME="dcore"
@@ -416,9 +416,9 @@ load_env
 # ==========================================
 log "Selecting Axion Build Variant"
 
-axion peridot user vanilla
+axion peridot user pico
 
-success "Axion Peridot User Vanilla selected"
+success "Axion Peridot User Pico selected"
 
 # ==========================================
 # Telegram - Build Started
